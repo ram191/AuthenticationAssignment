@@ -1,22 +1,53 @@
 ﻿using System;
-using Microsoft.AspNetCore.Mvc;
-using System.IdentityModel.Tokens.Jwt;
-using Microsoft.IdentityModel.Tokens;
-using System.Security;
-using System.Security.Claims;
-using System.Text;
 using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
+using System.Text;
 using AuthenticationTest.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
 
-namespace RayhanASPRestTest.Controllers
+namespace AuthenticationTest.Controllers
 {
 
+    [Route("[controller]")]
     [ApiController]
-    [Route("user")]
-    public class AuthController : ControllerBase
+    public class AuthController : Controller
     {
+        public IConfiguration _config;
+
+        public AuthController(IConfiguration config)
+        {
+            _config = config;
+        }
+
         [HttpPost]
-        public IActionResult Authenticate(Auth user)
+        public IActionResult Login([FromBody]Auth login)
+        {
+            IActionResult response = Unauthorized();
+            var user = AuthenticateUser(login);
+
+            if(user != null)
+            {
+                var tokenString = GenerateJSONWebToken(user);
+                response = Ok (new { token = tokenString });
+            }
+
+            return response;
+        }
+
+        private string GenerateJSONWebToken(Auth userinfo)
+        {
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+            var token = new JwtSecurityToken(_config["Jwt:Issuer"], _config["Jwt:Issuer"], null, expires: DateTime.Now.AddMinutes(120), signingCredentials: credentials);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        private Auth AuthenticateUser(Auth login)
         {
             var auth = new List<Auth>()
             {
@@ -25,29 +56,14 @@ namespace RayhanASPRestTest.Controllers
                 new Auth() { Username = "user3", Password = "secret" },
             };
 
-            var _user = auth.Find(x => x.Username == user.Username);
+            Auth user = null;
 
-            var tokenHandler = new JwtSecurityTokenHandler();
-
-            var tokenDesc = new SecurityTokenDescriptor()
+            if (auth.Any(x => x.Username == login.Username) && auth.Any(x => x.Password == login.Password))
             {
-                Subject = new ClaimsIdentity(new Claim[] {
-                    new Claim(ClaimTypes.Name, _user.Username),
-                    new Claim(ClaimTypes.Sid, _user.Password)
-                }),
-                Expires = DateTime.UtcNow.AddDays(7),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(Encoding.ASCII.GetBytes("secrethastobelongerthanitshouldbe")), SecurityAlgorithms.HmacSha256Signature)
-            };
+                user = auth.First(x => x.Username == login.Username);
+            }
 
-            var token = tokenHandler.CreateToken(tokenDesc);
-
-            var tokenResponse = new
-            {
-                token = tokenHandler.WriteToken(token),
-                user = _user.Username
-            };
-
-            return Ok(tokenResponse);
+            return user;
         }
     }
 }
